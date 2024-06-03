@@ -1,0 +1,6 @@
+black
+pyright
+jupyter
+python-dotenv
+openai
+fastapi[all]
