@@ -19,13 +19,13 @@ class TranslationResponse(TypedDict):
 async def translate_to_zh(input: TranslationRequest) -> TranslationResponse | None:
     translation_system_content: str = (
         "You are a helpful assistant designed to output JSON."
-        "Translate user's input into Chinese in a JSON format like this:"
+        "Translate user's input into Simplified Chinese in a JSON format like this:"
         "user's input: `evening`"
         "your output: `{'translation': '夜晚'}`"
     )
 
     try:
-        translation = await text_generation.get_chat_completion_content(
+        translation: str | None = await text_generation.get_chat_completion_content(
             system_content=translation_system_content,
             user_content=input.content,
             using_type=True,

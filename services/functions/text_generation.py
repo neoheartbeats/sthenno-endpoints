@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from openai.types.chat.chat_completion import ChatCompletion
 from openai.types.chat.chat_completion_role import ChatCompletionRole
-from typing import Final, Iterable, TypedDict, TypeAlias
+from typing import Iterable, Literal, TypedDict, TypeAlias, Any
 import os
 
 load_dotenv()
@@ -10,19 +10,16 @@ load_dotenv()
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 
-Role: TypeAlias = ChatCompletionRole
-
-
 class ChatCompletionMessageParam(TypedDict):
-    role: Role
+    role: ChatCompletionRole
     content: str
 
 
 Message: TypeAlias = ChatCompletionMessageParam
-Messages: TypeAlias = Iterable[ChatCompletionMessageParam]
+Messages: TypeAlias = Iterable[Message]
 
 
-def message(role: Role, content: str) -> Message:
+def message(role: ChatCompletionRole, content: str) -> Message:
     return Message(role=role, content=content)
 
 
@@ -31,9 +28,30 @@ user_message = lambda content: message("user", content)
 assistant_message = lambda content: message("assistant", content)
 
 
+class ChatCompletionUsage(TypedDict):
+    prompt_tokens: int
+    completion_tokens: int
+
+
 class ChatCompletionParam(TypedDict):
     content: str | None
-    usage: dict[str, int]
+    usage: ChatCompletionUsage
+
+
+class ResponseFormat(TypedDict, total=False):
+    type: Literal["text", "json_object"]
+
+
+# Using typing Any here for messages is not helpful. Messsages was
+# used but error at client.chat.completions.create(**options) was
+# reported by Pyright. This might be a bug of Pyright.
+
+
+class CompletionCreateParam(TypedDict, total=False):
+    model: str
+    messages: Any
+    temperature: float
+    response_format: ResponseFormat
 
 
 async def get_chat_completion_param(
@@ -47,13 +65,13 @@ async def get_chat_completion_param(
             user_message(user_content),
         ]
         gpt_model: str = "gpt-4o"
-        options: dict = {
-            "model": gpt_model,
-            "messages": messages,
-            "temperature": 0.0,
-        }
+        options = CompletionCreateParam(
+            model=gpt_model,
+            messages=messages,
+            temperature=0.0,
+        )
         if using_type:
-            options["response_format"] = {"type": "json_object"}
+            options["response_format"] = ResponseFormat(type="json_object")
         return client.chat.completions.create(**options)
 
     try:
@@ -67,10 +85,10 @@ async def get_chat_completion_param(
 
         return ChatCompletionParam(
             content=completion_content,
-            usage={
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-            },
+            usage=ChatCompletionUsage(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            ),
         )
 
     except Exception as e:
@@ -83,15 +101,12 @@ async def get_chat_completion_content(
     system_content: str = "",
     using_type: bool = False,
 ) -> str | None:
-    DEFAULT_SYSTEM_MESSAGE: Final[str] = "You are a helpful assistant."
-    DEFAULT_SYSTEM_MESSAGE_USING_TYPE: Final[str] = (
-        "You are a helpful assistant designed to output JSON."
-    )
-    if system_content == "" and not using_type:
-        system_content = DEFAULT_SYSTEM_MESSAGE
-    elif system_content == "" and using_type:
-        system_content = DEFAULT_SYSTEM_MESSAGE_USING_TYPE
-    completion = await get_chat_completion_param(
+    if system_content == "":
+        if using_type:
+            system_content = "You are a helpful assistant designed to output JSON."
+        else:
+            system_content = "You are a helpful assistant."
+    completion: ChatCompletionParam | None = await get_chat_completion_param(
         system_content=system_content,
         user_content=user_content,
         using_type=using_type,
