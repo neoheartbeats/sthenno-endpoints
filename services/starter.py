@@ -1,6 +1,7 @@
 from functions import text_generation
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from typing import TypedDict
 import json
 
 app = FastAPI()
@@ -10,21 +11,31 @@ class TranslationRequest(BaseModel):
     content: str
 
 
-@app.post("/translate/")
-async def translate(input: TranslationRequest):
-    translator_system_prompt: str = """You are a helpful assistant designed to output JSON.
-Translate the user's input from English into Chinese in a JSON format like this:
-input: `Hello`
-output: `{"translation": "你好"}`
-"""
+class TranslationResponse(TypedDict):
+    translation: str
+
+
+@app.post("/translate_to_zh/")
+async def translate_to_zh(input: TranslationRequest) -> TranslationResponse | None:
+    translation_system_content: str = (
+        "You are a helpful assistant designed to output JSON."
+        "Translate user's input into Chinese in a JSON format like this:"
+        "user's input: `evening`"
+        "your output: `{'translation': '夜晚'}`"
+    )
+
     try:
-        translation = await text_generation.from_user_request(
-            system_content=translator_system_prompt,
+        translation = await text_generation.get_chat_completion_content(
+            system_content=translation_system_content,
             user_content=input.content,
+            using_type=True,
         )
-        translation_obj: dict = json.loads(translation)
-        translation_content: str = translation_obj["translation"]
-        return {"translation": translation_content}
+
+        if translation is None:
+            return None
+        translation_content: str = json.loads(translation)["translation"]
+        return TranslationResponse(translation=translation_content)
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

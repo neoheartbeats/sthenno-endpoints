@@ -1,7 +1,8 @@
 from dotenv import load_dotenv
 from openai import OpenAI
-from typing import Final, Optional
-import asyncio
+from openai.types.chat.chat_completion import ChatCompletion
+from openai.types.chat.chat_completion_role import ChatCompletionRole
+from typing import Final, Iterable, TypedDict, TypeAlias
 import os
 
 load_dotenv()
@@ -9,65 +10,95 @@ load_dotenv()
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 
-def system_message(content: str) -> dict:
-    return {"role": "system", "content": content}
+Role: TypeAlias = ChatCompletionRole
 
 
-def user_message(content: str) -> dict:
-    return {"role": "user", "content": content}
+class ChatCompletionMessageParam(TypedDict):
+    role: Role
+    content: str
 
 
-def assistant_message(content: str) -> dict:
-    return {"role": "assistant", "content": content}
+Message: TypeAlias = ChatCompletionMessageParam
+Messages: TypeAlias = Iterable[ChatCompletionMessageParam]
 
 
-GPT_MODEL: Final[str] = "gpt-4o"
+def message(role: Role, content: str) -> Message:
+    return Message(role=role, content=content)
 
 
-async def get_chat_completion(system_content: str, user_content: str) -> dict | None:
-    try:
-        messages = [
-            system_message(content=system_content),
-            user_message(content=user_content),
+system_message = lambda content: message("system", content)
+user_message = lambda content: message("user", content)
+assistant_message = lambda content: message("assistant", content)
+
+
+class ChatCompletionParam(TypedDict):
+    content: str | None
+    usage: dict[str, int]
+
+
+async def get_chat_completion_param(
+    system_content: str,
+    user_content: str,
+    using_type: bool = False,
+) -> ChatCompletionParam | None:
+    def create_completion(using_type: bool) -> ChatCompletion:
+        messages: Messages = [
+            system_message(system_content),
+            user_message(user_content),
         ]
-        completion = client.chat.completions.create(
-            model=GPT_MODEL,
-            response_format={"type": "json_object"},
-            messages=messages,
-            temperature=0.0,
-        )
-        completion_content: str = completion.choices[0].message.content
-        prompt_tokens: int = completion.usage.prompt_tokens
-        completion_tokens: int = (
-            completion.usage.total_tokens - completion.usage.prompt_tokens
-        )
+        gpt_model: str = "gpt-4o"
+        options: dict = {
+            "model": gpt_model,
+            "messages": messages,
+            "temperature": 0.0,
+        }
+        if using_type:
+            options["response_format"] = {"type": "json_object"}
+        return client.chat.completions.create(**options)
 
-        return {
-            "content": completion_content,
-            "usage": {
+    try:
+        completion: ChatCompletion = create_completion(using_type)
+        completion_content: str | None = completion.choices[0].message.content
+
+        if completion.usage is None:
+            return None
+        prompt_tokens: int = completion.usage.prompt_tokens
+        completion_tokens: int = completion.usage.total_tokens - prompt_tokens
+
+        return ChatCompletionParam(
+            content=completion_content,
+            usage={
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
             },
-        }
+        )
+
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(e)
         return None
 
 
-DEFAULT_SYSTEM_MESSAGE: Final[str] = "You are a helpful assistant."
-DEFAULT_SYSTEM_MESSAGE_USING_TYPE: Final[str] = (
-    "You are a helpful assistant designed to output JSON."
-)
-
-
-async def from_user_request(
+async def get_chat_completion_content(
     user_content: str,
-    system_content: Optional[str] = DEFAULT_SYSTEM_MESSAGE_USING_TYPE,
+    system_content: str = "",
+    using_type: bool = False,
 ) -> str | None:
-    completion = await get_chat_completion(
+    DEFAULT_SYSTEM_MESSAGE: Final[str] = "You are a helpful assistant."
+    DEFAULT_SYSTEM_MESSAGE_USING_TYPE: Final[str] = (
+        "You are a helpful assistant designed to output JSON."
+    )
+    if system_content == "" and not using_type:
+        system_content = DEFAULT_SYSTEM_MESSAGE
+    elif system_content == "" and using_type:
+        system_content = DEFAULT_SYSTEM_MESSAGE_USING_TYPE
+    completion = await get_chat_completion_param(
         system_content=system_content,
         user_content=user_content,
+        using_type=using_type,
     )
-    if completion is not None:
-        return completion.get("content")
-    return None
+    if completion is None:
+        return None
+    return completion["content"]
+
+
+__all__ = ["get_chat_completion_content"]
